@@ -613,6 +613,9 @@ typedef struct client {
     /* Response buffer */
     int bufpos;
     char buf[PROTO_REPLY_CHUNK_BYTES];
+#ifdef WITH_NETMAP
+    void *nmmsg;
+#endif /* WITH_NETMAP */
 } client;
 
 struct saveparam {
@@ -700,6 +703,7 @@ struct clusterState;
 #ifdef _AIX
 #undef hz
 #endif
+
 
 struct redisServer {
     /* General */
@@ -977,6 +981,9 @@ struct redisServer {
     int watchdog_period;  /* Software watchdog period in ms. 0 = off */
     /* System hardware info */
     size_t system_memory_size;  /* Total memory in system as reported by OS */
+#ifdef WITH_NETMAP
+    void *netmap_global;
+#endif /* WITH_NETMAP */
 };
 
 typedef struct pubsubPattern {
@@ -1195,6 +1202,9 @@ robj *createObject(int type, void *ptr);
 robj *createStringObject(const char *ptr, size_t len);
 robj *createRawStringObject(const char *ptr, size_t len);
 robj *createEmbeddedStringObject(const char *ptr, size_t len);
+#ifdef WITH_NETMAP
+robj *netmap_createRawObject(char *ptr, size_t len);
+#endif /* WITH_NETMAP */
 robj *dupStringObject(robj *o);
 int isObjectRepresentableAsLongLong(robj *o, long long *llongval);
 robj *tryObjectEncoding(robj *o);

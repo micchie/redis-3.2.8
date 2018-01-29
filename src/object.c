@@ -54,6 +54,30 @@ robj *createRawStringObject(const char *ptr, size_t len) {
     return createObject(OBJ_STRING,sdsnewlen(ptr,len));
 }
 
+#ifdef WITH_NETMAP
+/*
+ * different in that it does not copy, the resultant object will point
+ * directly at a Netmap Ethernet frame.
+ *
+ */
+robj *netmap_createRawObject(char *ptr, size_t len) {
+    robj *o = zmalloc(sizeof(*o));
+    o->type = OBJ_STRING;
+    o->encoding = OBJ_ENCODING_RAW;
+    o->refcount = 2; /* to stop object system from trying to free */
+
+	struct sdshdr16 *p = (struct sdshdr16 *) (ptr - sizeof (struct sdshdr16));
+	p->flags = SDS_TYPE_16;
+	p->alloc = len;
+	p->len = len;
+    o->ptr = ptr;
+
+    /* Set the LRU to the current lruclock (minutes resolution). */
+    o->lru = LRU_CLOCK();
+    return o;
+}
+#endif /* WITH_NETMAP */
+
 /* Create a string object with encoding OBJ_ENCODING_EMBSTR, that is
  * an object where the sds string is actually an unmodifiable string
  * allocated in the same chunk as the object itself. */

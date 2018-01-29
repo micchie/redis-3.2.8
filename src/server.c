@@ -54,6 +54,13 @@
 #include <sys/utsname.h>
 #include <locale.h>
 #include <sys/socket.h>
+#ifdef WITH_NETMAP
+#define NMLIB_EXTRA_SLOT	1
+#define NETMAP_WITH_LIBS	1
+#include <sched.h>
+#include <net/if.h>
+#include <nmlib.h>
+#endif /* WITH_NETMAP */
 
 /* Our shared "common" objects */
 
@@ -991,6 +998,10 @@ void clientsCron(void) {
     int iterations = numclients/server.hz;
     mstime_t now = mstime();
 
+#ifdef WITH_NETMAP
+    /* XXX Not sure if it is correct */
+    return;
+#endif /* WITH_NETMAP */
     /* Process at least a few clients while we are at it, even if we need
      * to process less than CLIENTS_CRON_MIN_ITERATIONS to meet our contract
      * of processing each client once per second. */
@@ -1862,9 +1873,14 @@ void resetServerStats(void) {
 void initServer(void) {
     int j;
 
+#ifndef WITH_NETMAP
     signal(SIGHUP, SIG_IGN);
     signal(SIGPIPE, SIG_IGN);
     setupSignalHandlers();
+#else
+    int sd;
+    struct sockaddr_in sin;
+#endif /* !WITH_NETMAP */
 
     if (server.syslog_enabled) {
         openlog(server.syslog_ident, LOG_PID | LOG_NDELAY | LOG_NOWAIT,
@@ -1892,9 +1908,39 @@ void initServer(void) {
     server.db = zmalloc(sizeof(redisDb)*server.dbnum);
 
     /* Open the TCP listening socket for the user commands. */
+#ifdef WITH_NETMAP
+    /* XXX very weird existing listen routine does not work */
+    sd = socket(PF_INET, SOCK_STREAM, IPPROTO_TCP);
+    if (sd < 0) {
+	    perror("socket");
+	    exit(1);
+    }
+    if (do_setsockopt(sd)) {
+	    perror("setsockopt");
+	    exit(1);
+    }
+
+    memset(&sin, 0, sizeof(sin));
+    sin.sin_family = AF_INET;
+    sin.sin_addr.s_addr = htonl(INADDR_ANY);
+    sin.sin_port = htons(server.port);
+    if (bind(sd, (struct sockaddr *)&sin, sizeof(sin)) < 0) {
+	    perror("bind");
+	    close(sd);
+	    exit(1);
+    }
+    if (listen(sd, SOMAXCONN) != 0) {
+	    perror("listen");
+	    close(sd);
+	    exit(1);
+    }
+    *server.ipfd = sd;
+    server.ipfd_count = 1;
+#else
     if (server.port != 0 &&
         listenToPort(server.port,server.ipfd,&server.ipfd_count) == C_ERR)
         exit(1);
+#endif
 
     /* Open the listening Unix domain socket. */
     if (server.unixsocket != NULL) {
@@ -3939,6 +3985,93 @@ int redisIsSupervised(int mode) {
     return 0;
 }
 
+#ifdef WITH_NETMAP
+size_t getStringObjectSdsUsedMemory(robj *o);
+#define MAX_FDS 1024
+client *clientMap[MAX_FDS];
+
+static void nm_rds_flush_reply (client *c)
+{
+	size_t bytes = 0;
+    size_t objlen;
+    size_t objmem;
+	size_t space = 1300 - c->bufpos;
+	int N = 0;
+    robj *op;
+
+	while(listLength(c->reply)) {
+
+        op = listNodeValue(listFirst(c->reply));
+        objlen = sdslen(op->ptr);
+        objmem = getStringObjectSdsUsedMemory(op);
+
+        if (objlen == 0) {
+
+            listDelNode(c->reply,listFirst(c->reply));
+            c->reply_bytes -= objmem;
+            continue;
+        }
+
+		if (space < objlen) {
+
+			bytes += c->bufpos;
+			netmap_sendmsg (c->nmmsg, c->buf, c->bufpos);
+			c->bufpos = 0;
+			space = 1300;
+		}
+
+		memcpy (c->buf + c->bufpos, ((char*) op->ptr), objlen);
+		c->bufpos += objlen;
+		space -= objlen;
+
+		listDelNode(c->reply,listFirst(c->reply));
+		c->reply_bytes -= objmem;
+
+		++N;
+	}
+
+	netmap_sendmsg (c->nmmsg, c->buf, c->bufpos);
+	bytes += c->bufpos;
+
+#ifdef __PASTE_DEBUG
+	printf ("Redis sent %lu\n", bytes);
+#endif
+
+}
+static void netmap_data_handler(struct nm_msg *msg)
+{
+	struct netmap_ring *ring = msg->rxring;
+	struct netmap_slot *slot = msg->slot;
+	client *clientp = clientMap[slot->fd];
+	struct sdshdr16 *p;
+	u_int off = slot->offset + msg->targ->g->virt_header;
+	char *buf = NETMAP_BUF(ring, slot->buf_idx) + off;
+
+	if (!clientp) {
+		printf("No clientp for fd %d", slot->fd);
+		return;
+	}
+	clientp->querybuf = (sds)buf;
+	clientp->bufpos = 0;
+	/* Safe - we're just consuming TCP/IP header space */
+	p = (struct sdshdr16 *) (clientp->querybuf - sizeof (struct sdshdr16));
+	p->flags = SDS_TYPE_16;
+	p->alloc = 1448;
+	p->len = slot->len - off;
+	/* Set the currently running message */
+	clientp->nmmsg = msg;
+	processInputBuffer(clientp);
+	nm_rds_flush_reply (clientp);
+}
+
+static void netmap_accept_handler(struct nm_msg *msg)
+{
+	int fd = msg->slot->fd;
+
+	clientMap[fd] = createClient(fd);
+}
+
+#endif /* WITH_NETMAP */
 
 int main(int argc, char **argv) {
     struct timeval tv;
@@ -4110,6 +4243,16 @@ int main(int argc, char **argv) {
         serverLog(LL_WARNING,"WARNING: You specified a maxmemory value that is less than 1MB (current value is %llu bytes). Are you sure this is what you really want?", server.maxmemory);
     }
 
+#ifdef WITH_NETMAP
+    {
+    int netmap_error = 0;
+    netmap_eventloop(&server.netmap_global, &netmap_error,
+		    server.ipfd, server.ipfd_count,
+		    netmap_data_handler, netmap_accept_handler);
+    free(server.netmap_global);
+    return 0;
+    }
+#endif /* WITH_NETMAP */
     aeSetBeforeSleepProc(server.el,beforeSleep);
     aeMain(server.el);
     aeDeleteEventLoop(server.el);

@@ -30,6 +30,13 @@
 #include "server.h"
 #include <sys/uio.h>
 #include <math.h>
+#ifdef WITH_NETMAP
+#define NETMAP_WITH_LIBS	1
+#include <net/if.h>
+#define NMLIB_EXTRA_SLOT	1
+#include <nmlib.h>
+#include <x86intrin.h>
+#endif /* WITH_NETMAP */
 
 static void setProtocolError(client *c, int pos);
 
@@ -810,7 +817,9 @@ void freeClient(client *c) {
     }
 
     /* Free the query buffer */
+#ifndef WITH_NETMAP
     sdsfree(c->querybuf);
+#endif
     c->querybuf = NULL;
 
     /* Deallocate structures used to block on blocking ops. */
@@ -1238,9 +1247,31 @@ int processMultibulkBuffer(client *c) {
                 sdsclear(c->querybuf);
                 pos = 0;
             } else {
+#ifdef WITH_NETMAP
+		struct nm_msg *nmmsg = c->nmmsg;
+		int i;
+
+		if (!nmmsg)
+			D("no nmmsg");
+		if (c->argc == 3) { // This is an HSET we support
+			c->argv[c->argc++] =
+				netmap_createRawObject(c->querybuf + pos,
+						c->bulklen);
+		} else
+#endif /* WITH_NETMAP */
                 c->argv[c->argc++] =
                     createStringObject(c->querybuf+pos,c->bulklen);
                 pos += c->bulklen+2;
+#ifdef WITH_NETMAP
+		if (c->argc == 4) { // This is an HSET we support
+			ND("nmmsg %p c->argc %d bulklen %u pos %u", nmmsg, c->argc, c->bulklen, pos);
+			/* swap out buffer */
+			for (i = 0; i < c->bulklen; i+=64) {
+				_mm_clflush(c->querybuf + i);
+			}
+			netmap_swap_out(nmmsg);
+		}
+#endif /* WITH_NETMAP */
             }
             c->bulklen = -1;
             c->multibulklen--;
