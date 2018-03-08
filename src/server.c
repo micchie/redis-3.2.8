@@ -4246,9 +4246,16 @@ int main(int argc, char **argv) {
 #ifdef WITH_NETMAP
     {
     int netmap_error = 0;
+    struct netmap_events e;
+
+    bzero(&e, sizeof(e));
+    e.data = netmap_data_handler;
+    e.connections = netmap_accept_handler;
     netmap_eventloop(&server.netmap_global, &netmap_error,
-		    server.ipfd, server.ipfd_count,
-		    netmap_data_handler, netmap_accept_handler);
+		    server.ipfd, server.ipfd_count, &e);
+    //netmap_eventloop(&server.netmap_global, &netmap_error,
+//		    server.ipfd, server.ipfd_count,
+//		    netmap_data_handler, netmap_accept_handler);
     free(server.netmap_global);
     return 0;
     }
