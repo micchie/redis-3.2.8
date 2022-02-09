@@ -619,6 +619,11 @@ void loadServerConfigFromString(char *config) {
                 err = sentinelHandleConfiguration(argv+1,argc-1);
                 if (err) goto loaderr;
             }
+#ifdef WITH_NETMAP
+	} else if (!strcasecmp(argv[0], "netmap-port") && argc == 2) {
+		strncpy(server.netmap_port, argv[1],
+			sizeof(server.netmap_port));
+#endif
         } else {
             err = "Bad directive or wrong number of arguments"; goto loaderr;
         }

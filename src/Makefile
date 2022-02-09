@@ -53,6 +53,7 @@ endif
 # Override default settings if possible
 -include .make-settings
 
+
 FINAL_CFLAGS=$(STD) $(WARN) $(OPT) $(DEBUG) $(CFLAGS) $(REDIS_CFLAGS) -I../deps/geohash-int
 FINAL_LDFLAGS=$(LDFLAGS) $(REDIS_LDFLAGS) $(DEBUG)
 FINAL_LIBS=-lm
@@ -84,6 +85,8 @@ else
 	# All the other OSes (notably Linux)
 	FINAL_LDFLAGS+= -rdynamic
 	FINAL_LIBS+=-ldl -pthread
+	FINAL_LIBS+= -lbsd
+	FINAL_LIBS+= ../../netmap/libnetmap/libnetmap.a
 endif
 endif
 endif

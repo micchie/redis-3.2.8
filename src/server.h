@@ -982,6 +982,7 @@ struct redisServer {
     /* System hardware info */
     size_t system_memory_size;  /* Total memory in system as reported by OS */
 #ifdef WITH_NETMAP
+    char netmap_port[16];
     void *netmap_global;
 #endif /* WITH_NETMAP */
 };

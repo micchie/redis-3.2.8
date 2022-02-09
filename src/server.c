@@ -4038,18 +4038,17 @@ static void nm_rds_flush_reply (client *c)
 #endif
 
 }
-static void netmap_data_handler(struct nm_msg *msg)
+static int netmap_data_handler(struct nm_msg *msg)
 {
 	struct netmap_ring *ring = msg->rxring;
 	struct netmap_slot *slot = msg->slot;
-	client *clientp = clientMap[slot->fd];
+	client *clientp = clientMap[msg->fd];
 	struct sdshdr16 *p;
-	u_int off = slot->offset + msg->targ->g->virt_header;
-	char *buf = NETMAP_BUF(ring, slot->buf_idx) + off;
+	char *buf = NETMAP_BUF_OFFSET(ring, slot) + nm_pst_getdoff(slot);
 
 	if (!clientp) {
-		printf("No clientp for fd %d", slot->fd);
-		return;
+		printf("No clientp for fd %d", msg->fd);
+		return 0;
 	}
 	clientp->querybuf = (sds)buf;
 	clientp->bufpos = 0;
@@ -4057,16 +4056,17 @@ static void netmap_data_handler(struct nm_msg *msg)
 	p = (struct sdshdr16 *) (clientp->querybuf - sizeof (struct sdshdr16));
 	p->flags = SDS_TYPE_16;
 	p->alloc = 1448;
-	p->len = slot->len - off;
+	p->len = slot->len - nm_pst_getdoff(slot);
 	/* Set the currently running message */
 	clientp->nmmsg = msg;
 	processInputBuffer(clientp);
 	nm_rds_flush_reply (clientp);
+	return 0;
 }
 
 static void netmap_accept_handler(struct nm_msg *msg)
 {
-	int fd = msg->slot->fd;
+	int fd = nm_pst_getfd(msg->slot);
 
 	clientMap[fd] = createClient(fd);
 }
@@ -4246,17 +4246,14 @@ int main(int argc, char **argv) {
 #ifdef WITH_NETMAP
     {
     int netmap_error = 0;
-    struct netmap_events e;
+    struct nm_garg nmg, *ret;
 
-    bzero(&e, sizeof(e));
-    e.data = netmap_data_handler;
-    e.connections = netmap_accept_handler;
-    netmap_eventloop(&server.netmap_global, &netmap_error,
-		    server.ipfd, server.ipfd_count, &e);
-    //netmap_eventloop(&server.netmap_global, &netmap_error,
-//		    server.ipfd, server.ipfd_count,
-//		    netmap_data_handler, netmap_accept_handler);
-    free(server.netmap_global);
+    memset(&nmg, 0, sizeof(nmg));
+    nmg.data = netmap_data_handler;
+    nmg.connection = netmap_accept_handler;
+    netmap_eventloop("pst:0", server.netmap_port, (void **)&ret, &netmap_error,
+		    server.ipfd, server.ipfd_count, NULL, 0,
+		    &nmg, NULL);
     return 0;
     }
 #endif /* WITH_NETMAP */
