@@ -4249,6 +4249,7 @@ int main(int argc, char **argv) {
     struct nm_garg nmg, *ret;
 
     memset(&nmg, 0, sizeof(nmg));
+    nmg.dev_type = DEV_NETMAP;
     nmg.data = netmap_data_handler;
     nmg.connection = netmap_accept_handler;
     netmap_eventloop("pst:0", server.netmap_port, (void **)&ret, &netmap_error,
