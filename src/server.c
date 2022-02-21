@@ -4052,10 +4052,10 @@ static int netmap_data_handler(struct nm_msg *msg)
 	}
 	clientp->querybuf = (sds)buf;
 	clientp->bufpos = 0;
-	/* Safe - we're just consuming TCP/IP header space */
+	/* Overwrite TCP/IP header space */
 	p = (struct sdshdr16 *) (clientp->querybuf - sizeof (struct sdshdr16));
 	p->flags = SDS_TYPE_16;
-	p->alloc = 1448;
+	p->alloc = ring->nr_buf_size - NETMAP_ROFFSET(ring, slot);
 	p->len = slot->len - nm_pst_getdoff(slot);
 	/* Set the currently running message */
 	clientp->nmmsg = msg;

@@ -1079,12 +1079,12 @@ static void paste_load (void) {
 				obj = zipf (config.alpha, config.N_Robjs) - 1;
 				assert (obj >= 0 && obj < config.N_Robjs);
 
-			} else
+			} else {
 				obj = rand () % config.N_Robjs;
+			}
 
 			argv[1] = Universe[obj];
 			rc = cliSendCommand (3, argv, 1);
-
 		} else {
 
 			argv[0][1] = 'S';

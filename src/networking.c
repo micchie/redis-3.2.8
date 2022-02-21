@@ -1251,8 +1251,6 @@ int processMultibulkBuffer(client *c) {
 		struct nm_msg *nmmsg = c->nmmsg;
 		int i;
 
-		if (!nmmsg)
-			D("no nmmsg");
 		if (c->argc == 3) { // This is an HSET we support
 			c->argv[c->argc++] =
 				netmap_createRawObject(c->querybuf + pos,
@@ -1264,7 +1262,6 @@ int processMultibulkBuffer(client *c) {
                 pos += c->bulklen+2;
 #ifdef WITH_NETMAP
 		if (c->argc == 4) { // This is an HSET we support
-			ND("nmmsg %p c->argc %d bulklen %u pos %u", nmmsg, c->argc, c->bulklen, pos);
 			/* swap out buffer */
 			for (i = 0; i < c->bulklen; i+=64) {
 				_mm_clflush(c->querybuf + i);
