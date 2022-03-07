@@ -60,6 +60,32 @@
 #include <sched.h>
 #include <net/if.h>
 #include <nmlib.h>
+
+char *
+chkpath(char *dir, char *f, size_t size, int rm)
+{
+	int fd, mode = O_RDWR|O_CREAT;
+	char *path;
+
+	if (asprintf(&path, "%s/%s", dir, f) < 0) {
+		return NULL;
+	}
+	if ((fd = open(path, mode, S_IRWXU)) < 0) {
+		perror("open");
+		free(path);
+		return NULL;
+	}
+	if (fallocate(fd, 0, 0, size)) {
+		D("fallocate %s failed size %lu", path, size);
+		close(fd);
+		free(path);
+		return NULL;
+	}
+	if (rm)
+		unlink(path);
+	close(fd);
+	return path;
+}
 #endif /* WITH_NETMAP */
 
 /* Our shared "common" objects */
@@ -4055,7 +4081,7 @@ static int netmap_data_handler(struct nm_msg *msg)
 	/* Overwrite TCP/IP header space */
 	p = (struct sdshdr16 *) (clientp->querybuf - sizeof (struct sdshdr16));
 	p->flags = SDS_TYPE_16;
-	p->alloc = ring->nr_buf_size - NETMAP_ROFFSET(ring, slot);
+	p->alloc = ring->nr_buf_size - NETMAP_ROFFSET(ring, slot) - nm_pst_getdoff(slot);
 	p->len = slot->len - nm_pst_getdoff(slot);
 	/* Set the currently running message */
 	clientp->nmmsg = msg;
@@ -4252,6 +4278,16 @@ int main(int argc, char **argv) {
     nmg.dev_type = DEV_NETMAP;
     nmg.data = netmap_data_handler;
     nmg.connection = netmap_accept_handler;
+    nmg.extra_bufs = server.netmap_extnum;
+    if (strlen(server.netmap_pmem) > 0) {
+	    D("%s", server.netmap_pmem);
+	/* 32B metadata per netmap buffer */
+	nmg.extmem_siz = server.netmap_extnum * 2048 + 256 * 2048 ; // XXX
+	nmg.extmem = chkpath(server.netmap_pmem, "netmap_mem",
+			nmg.extmem_siz, 0);
+	if (nmg.extmem == NULL)
+		exit(1);
+    }
     netmap_eventloop("pst:0", server.netmap_port, (void **)&ret, &netmap_error,
 		    server.ipfd, server.ipfd_count, NULL, 0,
 		    &nmg, NULL);

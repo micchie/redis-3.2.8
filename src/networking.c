@@ -1266,7 +1266,8 @@ int processMultibulkBuffer(client *c) {
 			for (i = 0; i < c->bulklen; i+=64) {
 				_mm_clflush(c->querybuf + i);
 			}
-			netmap_swap_out(nmmsg);
+			if (netmap_swap_out(nmmsg) < 0)
+				D("failed to swap out buffer");
 		}
 #endif /* WITH_NETMAP */
             }

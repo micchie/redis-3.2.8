@@ -623,6 +623,11 @@ void loadServerConfigFromString(char *config) {
 	} else if (!strcasecmp(argv[0], "netmap-port") && argc == 2) {
 		strncpy(server.netmap_port, argv[1],
 			sizeof(server.netmap_port));
+	} else if (!strcasecmp(argv[0], "netmap-pmem") && argc == 2) {
+		strncpy(server.netmap_pmem, argv[1],
+			sizeof(server.netmap_pmem));
+	} else if (!strcasecmp(argv[0], "netmap-extnum") && argc == 2) {
+		server.netmap_extnum = atoll(argv[1]);
 #endif
         } else {
             err = "Bad directive or wrong number of arguments"; goto loaderr;

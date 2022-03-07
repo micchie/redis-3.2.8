@@ -638,7 +638,6 @@ static void addHashFieldToReply(client *c, robj *o, robj *field) {
         } else {
             addReplyBulk(c, value);
         }
-
     } else {
         serverPanic("Unknown hash encoding");
     }
